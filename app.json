@@ -7,11 +7,22 @@
     "userInterfaceStyle": "light",
     "ios": {
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "This app needs access to microphone to detect AI-generated audio."
-      }
+        "NSMicrophoneUsageDescription": "This app needs access to microphone to detect AI-generated audio.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "com.anonymous.lionmobile"
     },
     "android": {
-      "permissions": ["RECORD_AUDIO"]
+      "permissions": [
+        "RECORD_AUDIO",
+        "RECORD_AUDIO"
+      ],
+      "package": "com.anonymous.lionmobile"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "a1819e7e-e143-4ebb-84b6-96b3b360c4a9"
+      }
     }
   }
 }
