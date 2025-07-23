@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   Text,
@@ -8,15 +8,33 @@ import {
   Alert,
   Platform,
   ScrollView,
+  Animated,
+  Easing,
+  Dimensions,
 } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 import * as Notifications from 'expo-notifications';
 import { Audio } from 'expo-av';
+import { 
+  Mic, 
+  MicOff, 
+  AlertCircle, 
+  CheckCircle, 
+  Activity,
+  Zap,
+  Shield,
+  AlertTriangle,
+  Radio,
+  Settings,
+  ChevronRight
+} from 'lucide-react-native';
 
 // Add type declaration for global
 declare global {
   var nativeModulesProxy: any;
 }
+
+const { width } = Dimensions.get('window');
 
 // Check if we're in development mode without screen recorder
 const isDevelopment = __DEV__ && !global.nativeModulesProxy?.ScreenRecorder;
@@ -44,18 +62,198 @@ interface DetectionResult {
   aiPercent: number;
   realPercent: number;
   timestamp: Date;
+  chunkId: number;
+}
+
+interface StreamingConfig {
+  RATE: number;
+  CHANNELS: number;
+  CHUNK_DURATION: number;
+  STREAM_INTERVAL: number;
+  BUFFER_DURATION: number;
+  MIN_VOLUME_THRESHOLD: number;
+}
+
+// Loading Screen Component
+function LoadingScreen({ onLoadComplete }: { onLoadComplete: () => void }) {
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const scaleAnim = useRef(new Animated.Value(0.3)).current;
+  const rotateAnim = useRef(new Animated.Value(0)).current;
+  const letterAnims = useRef([
+    new Animated.Value(-50),
+    new Animated.Value(-50),
+    new Animated.Value(-50),
+    new Animated.Value(-50),
+  ]).current;
+
+  useEffect(() => {
+    // Entrance animation sequence
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: true,
+      }),
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        tension: 20,
+        friction: 7,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    // Rotate the shield icon
+    Animated.loop(
+      Animated.timing(rotateAnim, {
+        toValue: 1,
+        duration: 4000,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    ).start();
+
+    // Animate letters dropping in
+    const letterAnimations = letterAnims.map((anim, index) =>
+      Animated.spring(anim, {
+        toValue: 0,
+        delay: index * 100,
+        tension: 50,
+        friction: 7,
+        useNativeDriver: true,
+      })
+    );
+
+    Animated.sequence([
+      Animated.delay(300),
+      Animated.parallel(letterAnimations),
+    ]).start(() => {
+      // Complete loading after animations
+      setTimeout(onLoadComplete, 1000);
+    });
+  }, []);
+
+  const spin = rotateAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+
+  return (
+    <View style={styles.loadingContainer}>
+      <Animated.View
+        style={[
+          styles.loadingContent,
+          {
+            opacity: fadeAnim,
+            transform: [{ scale: scaleAnim }],
+          },
+        ]}
+      >
+        <Animated.View
+          style={{
+            transform: [{ rotate: spin }],
+            marginBottom: 40,
+          }}
+        >
+          <Shield size={80} color="#FFD700" strokeWidth={1.5} />
+        </Animated.View>
+
+        <View style={styles.titleContainer}>
+          {['L', 'I', 'O', 'N'].map((letter, index) => (
+            <Animated.Text
+              key={index}
+              style={[
+                styles.loadingLetter,
+                {
+                  transform: [
+                    { translateY: letterAnims[index] },
+                    {
+                      rotate: index === 2 ? '360deg' : '0deg', // Spin the 'O'
+                    },
+                  ],
+                },
+              ]}
+            >
+              {letter}
+            </Animated.Text>
+          ))}
+        </View>
+
+        <Animated.View
+          style={[
+            styles.loadingSubtitle,
+            {
+              opacity: fadeAnim,
+            },
+          ]}
+        >
+          <Text style={styles.loadingSubtitleText}>AI Audio Detection</Text>
+          <Activity
+            size={16}
+            color="#999"
+            style={{ marginLeft: 8 }}
+          />
+        </Animated.View>
+      </Animated.View>
+    </View>
+  );
 }
 
 export default function App() {
+  const [isLoading, setIsLoading] = useState(true);
+  
+  // Title animation refs
+  const titleScaleAnim = useRef(new Animated.Value(1)).current;
+  const titleRotateAnim = useRef(new Animated.Value(0)).current;
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  // Streaming configuration
+  const streamingConfig: StreamingConfig = {
+    RATE: 22050,
+    CHANNELS: 1,
+    CHUNK_DURATION: 4.0,
+    STREAM_INTERVAL: 500,
+    BUFFER_DURATION: 8.0,
+    MIN_VOLUME_THRESHOLD: 0.0001,
+  };
+
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [progress, setProgress] = useState(0);
   const [lastResult, setLastResult] = useState<DetectionResult | null>(null);
   const [history, setHistory] = useState<DetectionResult[]>([]);
-  const [devRecording, setDevRecording] = useState<Audio.Recording | null>(null);
+  const [streamingStatus, setStreamingStatus] = useState('');
+  const [detectionEvent, setDetectionEvent] = useState(false);
+  const [chunkCount, setChunkCount] = useState(0);
+
+  // Refs for streaming
+  const recordingRef = useRef<Audio.Recording | null>(null);
+  const audioBufferRef = useRef<number[]>([]);
+  const streamingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isStreamingRef = useRef(false);
+  const lastProcessTimeRef = useRef(0);
+  const consecutiveDetectionsRef = useRef(0);
 
   useEffect(() => {
-    // Request permissions on mount
+    if (!isLoading) {
+      // Start pulse animation when app loads
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.1,
+            duration: 1000,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 1000,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+        ])
+      ).start();
+    }
+
+    // Request permissions
     (async () => {
       const { status: notifStatus } = await Notifications.requestPermissionsAsync();
       if (notifStatus !== 'granted') {
@@ -63,141 +261,160 @@ export default function App() {
       }
 
       if (isDevelopment) {
-        // Request microphone permission for dev mode
         const { status: audioStatus } = await Audio.requestPermissionsAsync();
         if (audioStatus !== 'granted') {
           Alert.alert('Dev Mode', 'Microphone permission needed for development mode');
         }
       }
     })();
-  }, []);
 
-  async function startRecording() {
-    try {
-      console.log('Starting recording...');
-      
-      if (isDevelopment) {
-        // DEVELOPMENT MODE: Use microphone
-        console.log('🔧 DEVELOPMENT MODE: Screen recording simulated, using microphone');
-        
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: true,
-          playsInSilentModeIOS: true,
-        });
-        
-        const { recording } = await Audio.Recording.createAsync(
-          Audio.RecordingOptionsPresets.HIGH_QUALITY
-        );
-        setDevRecording(recording);
-        
-        Alert.alert(
-          'Dev Mode: Recording Started',
-          'Using microphone instead of screen recording. Play audio from speakers to test.',
-          [{ text: 'OK' }]
-        );
-      } else {
-        // PRODUCTION MODE: Real screen recording
-        const result = await ScreenRecorder.startRecording({ mic: false });
-        
-        if (result) {
-          Alert.alert(
-            'Recording Started! 🎬',
-            'Switch to TikTok/Instagram and browse videos. Come back here to stop recording.',
-            [{ text: 'Got it!' }]
-          );
-        }
+    return () => {
+      if (streamingIntervalRef.current) {
+        clearInterval(streamingIntervalRef.current);
       }
-      
-      setIsRecording(true);
-      setProgress(0);
-      
-      // Progress timer
-      let progressInterval = setInterval(() => {
-        setProgress(prev => {
-          const newProgress = prev + (1 / 30);
-          if (newProgress >= 1) {
-            clearInterval(progressInterval);
-            stopRecording();
-          }
-          return Math.min(newProgress, 1);
-        });
-      }, 1000);
-      
+    };
+  }, [isLoading]);
+
+  // Button press animation
+  const animateButtonPress = () => {
+    // Animate title
+    Animated.parallel([
+      Animated.sequence([
+        Animated.timing(titleScaleAnim, {
+          toValue: 0.9,
+          duration: 100,
+          useNativeDriver: true,
+        }),
+        Animated.spring(titleScaleAnim, {
+          toValue: 1,
+          friction: 3,
+          tension: 40,
+          useNativeDriver: true,
+        }),
+      ]),
+      Animated.timing(titleRotateAnim, {
+        toValue: 1,
+        duration: 500,
+        easing: Easing.elastic(1),
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      titleRotateAnim.setValue(0);
+    });
+  };
+
+  // Calculate RMS volume
+  function calculateRMS(audioData: number[]): number {
+    if (audioData.length === 0) return 0;
+    const sum = audioData.reduce((acc, val) => acc + val * val, 0);
+    return Math.sqrt(sum / audioData.length);
+  }
+
+  // Process audio buffer and send to API
+  async function processStreamingChunk() {
+    if (!isStreamingRef.current || audioBufferRef.current.length === 0) {
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastProcessTimeRef.current < streamingConfig.STREAM_INTERVAL) {
+      return;
+    }
+
+    lastProcessTimeRef.current = now;
+
+    const bufferCopy = [...audioBufferRef.current];
+    const bufferDuration = bufferCopy.length / streamingConfig.RATE;
+
+    if (bufferDuration < streamingConfig.CHUNK_DURATION) {
+      setStreamingStatus(`Buffering... (${bufferDuration.toFixed(1)}s / ${streamingConfig.CHUNK_DURATION}s needed)`);
+      return;
+    }
+
+    const volume = calculateRMS(bufferCopy);
+    if (volume < streamingConfig.MIN_VOLUME_THRESHOLD) {
+      setStreamingStatus(`Audio too quiet (${volume.toFixed(6)})`);
+      return;
+    }
+
+    const samplesNeeded = Math.floor(streamingConfig.CHUNK_DURATION * streamingConfig.RATE);
+    const chunkData = bufferCopy.slice(-samplesNeeded);
+
+    const currentChunkId = chunkCount + 1;
+    setChunkCount(currentChunkId);
+    setStreamingStatus(`Processing chunk #${currentChunkId} (${streamingConfig.CHUNK_DURATION}s, vol: ${volume.toFixed(4)})`);
+
+    try {
+      const wavBlob = await createWavBlob(chunkData, streamingConfig.RATE);
+      await processAudioChunk(wavBlob, currentChunkId);
     } catch (error) {
-      console.error('Failed to start recording:', error);
-      Alert.alert('Error', 'Failed to start recording');
-      setIsRecording(false);
+      console.error('Chunk processing error:', error);
+      setStreamingStatus(`Error processing chunk #${currentChunkId}`);
     }
   }
 
-  async function stopRecording() {
-    try {
-      console.log('Stopping recording...');
-      setIsRecording(false);
-      
-      let audioPath: string;
-      
-      if (isDevelopment) {
-        // DEVELOPMENT MODE: Stop microphone recording
-        console.log('🔧 DEVELOPMENT MODE: Stopping microphone recording');
-        
-        if (devRecording) {
-          await devRecording.stopAndUnloadAsync();
-          const uri = devRecording.getURI();
-          if (uri) {
-            audioPath = uri;
-            setDevRecording(null);
-          } else {
-            throw new Error('No recording URI');
-          }
-        } else {
-          throw new Error('No recording in progress');
-        }
-      } else {
-        // PRODUCTION MODE: Stop screen recording
-        const videoPath = await ScreenRecorder.stopRecording();
-        console.log('Screen recording saved to:', videoPath);
-        
-        // In production, you'd extract audio from video here
-        // For now, we'll process the video directly
-        audioPath = videoPath;
+  // Create WAV blob from audio data
+  async function createWavBlob(audioData: number[], sampleRate: number): Promise<Blob> {
+    const length = audioData.length;
+    const buffer = new ArrayBuffer(44 + length * 2);
+    const view = new DataView(buffer);
+
+    const writeString = (offset: number, string: string) => {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
       }
-      
-      setIsProcessing(true);
-      await processAudio(audioPath);
-      
-    } catch (error) {
-      console.error('Failed to stop recording:', error);
-      Alert.alert('Error', 'Failed to stop recording');
+    };
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + length * 2, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeString(36, 'data');
+    view.setUint32(40, length * 2, true);
+
+    let offset = 44;
+    for (let i = 0; i < length; i++) {
+      const sample = Math.max(-1, Math.min(1, audioData[i]));
+      view.setInt16(offset, sample * 0x7FFF, true);
+      offset += 2;
     }
+
+    return new Blob([buffer], { type: 'audio/wav' });
   }
 
-  async function processAudio(audioPath: string) {
+  // Process a single audio chunk
+  async function processAudioChunk(audioBlob: Blob, chunkId: number) {
     try {
-      console.log('Processing audio:', audioPath);
-      
-      // Create form data
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve, reject) => {
+        reader.onloadend = () => {
+          const base64 = reader.result as string;
+          resolve(base64.split(',')[1]);
+        };
+        reader.onerror = reject;
+      });
+      reader.readAsDataURL(audioBlob);
+      const base64Audio = await base64Promise;
+
+      const tempUri = `${FileSystem.cacheDirectory}chunk_${chunkId}.wav`;
+      await FileSystem.writeAsStringAsync(tempUri, base64Audio, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
       const formData = new FormData();
-      
-      if (isDevelopment) {
-        // In dev mode, we have an audio file
-        formData.append('files', {
-          uri: audioPath,
-          type: 'audio/wav',
-          name: 'audio.wav',
-        } as any);
-      } else {
-        // In production, we'd have a video file
-        // You'd extract audio first, but for now send video
-        formData.append('files', {
-          uri: Platform.OS === 'ios' ? audioPath.replace('file://', '') : audioPath,
-          type: 'video/mp4',
-          name: 'recording.mp4',
-        } as any);
-      }
+      formData.append('files', {
+        uri: tempUri,
+        type: 'audio/wav',
+        name: `chunk_${chunkId}.wav`,
+      } as any);
 
-      // Upload to API
-      console.log('Uploading to HuggingFace...');
       const uploadResponse = await fetch(`${HF_API_URL}/upload`, {
         method: 'POST',
         body: formData,
@@ -210,7 +427,6 @@ export default function App() {
       const uploadResult = await uploadResponse.json();
       const filePath = uploadResult[0];
 
-      // Make prediction
       const predictionResponse = await fetch(`${HF_API_URL}/call/predict`, {
         method: 'POST',
         headers: {
@@ -227,9 +443,8 @@ export default function App() {
       const predictionResult = await predictionResponse.json();
       const eventId = predictionResult.event_id;
 
-      // Poll for results
       let result = null;
-      for (let i = 0; i < 30; i++) {
+      for (let i = 0; i < 10; i++) {
         const pollResponse = await fetch(`${HF_API_URL}/call/predict/${eventId}`);
         const text = await pollResponse.text();
         
@@ -249,126 +464,318 @@ export default function App() {
         }
         
         if (result) break;
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 200));
       }
 
       if (result) {
-        console.log('Got result:', result);
-        
-        // Extract percentages
-        const aiMatch = result.match(/AI Generated[^0-9]*(\d+\.?\d*)%/i);
-        const realMatch = result.match(/Real Voice[^0-9]*(\d+\.?\d*)%/i);
-        
-        const aiPercent = aiMatch ? parseFloat(aiMatch[1]) : 0;
-        const realPercent = realMatch ? parseFloat(realMatch[1]) : 0;
-        
-        const isAI = aiPercent > 50;
-        
-        const detectionResult: DetectionResult = {
-          isAI,
-          aiPercent,
-          realPercent,
-          timestamp: new Date(),
-        };
-        
-        setLastResult(detectionResult);
-        setHistory(prev => [detectionResult, ...prev].slice(0, 10)); // Keep last 10
-        
-        // Show notification if AI detected
-        if (isAI) {
-          await Notifications.scheduleNotificationAsync({
-            content: {
-              title: '🚨 AI Audio Detected!',
-              body: `AI confidence: ${aiPercent}%`,
-            },
-            trigger: null,
-          });
-        }
+        handleStreamingResult(result, chunkId);
       }
 
-      // Clean up the file
-      try {
-        await FileSystem.deleteAsync(audioPath, { idempotent: true });
-        console.log('Cleaned up recording file');
-      } catch (e) {
-        console.log('Could not delete file:', e);
-      }
+      await FileSystem.deleteAsync(tempUri, { idempotent: true });
 
     } catch (error) {
-      console.error('Processing error:', error);
-      Alert.alert('Error', 'Failed to process audio');
-    } finally {
-      setIsProcessing(false);
+      console.error(`Chunk #${chunkId} processing error:`, error);
     }
   }
+
+  // Handle streaming detection result
+  function handleStreamingResult(result: string, chunkId: number) {
+    console.log(`Result for chunk #${chunkId}:`, result);
+
+    const aiMatch = result.match(/AI Generated[^0-9]*(\d+\.?\d*)%/i);
+    const realMatch = result.match(/Real Voice[^0-9]*(\d+\.?\d*)%/i);
+    
+    const aiPercent = aiMatch ? parseFloat(aiMatch[1]) : 0;
+    const realPercent = realMatch ? parseFloat(realMatch[1]) : 0;
+    
+    const isAI = aiPercent > 30;
+    
+    const detectionResult: DetectionResult = {
+      isAI,
+      aiPercent,
+      realPercent,
+      timestamp: new Date(),
+      chunkId,
+    };
+    
+    setLastResult(detectionResult);
+    setHistory(prev => [detectionResult, ...prev].slice(0, 20));
+    
+    if (isAI) {
+      consecutiveDetectionsRef.current++;
+      
+      if (!detectionEvent) {
+        setDetectionEvent(true);
+        console.log(`AI DETECTION EVENT! Chunk #${chunkId}`);
+        
+        Notifications.scheduleNotificationAsync({
+          content: {
+            title: 'AI Audio Detection Event',
+            body: `AI voice detected: ${aiPercent}% confidence (streaming)`,
+          },
+          trigger: null,
+        });
+      } else {
+        console.log(`Continuing detection: ${consecutiveDetectionsRef.current} consecutive chunks`);
+      }
+    } else {
+      if (detectionEvent && consecutiveDetectionsRef.current > 0) {
+        console.log(`Detection event ended after ${consecutiveDetectionsRef.current} chunks`);
+        setDetectionEvent(false);
+        consecutiveDetectionsRef.current = 0;
+      }
+    }
+    
+    setStreamingStatus(`Chunk #${chunkId}: ${isAI ? 'AI' : 'Real'} (${aiPercent}% AI)`);
+  }
+
+  async function startRecording() {
+    try {
+      animateButtonPress();
+      console.log('Starting streaming recording...');
+      
+      audioBufferRef.current = [];
+      setChunkCount(0);
+      consecutiveDetectionsRef.current = 0;
+      setDetectionEvent(false);
+      isStreamingRef.current = true;
+      
+      if (isDevelopment) {
+        console.log('DEVELOPMENT MODE: Streaming from microphone');
+        
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: true,
+          playsInSilentModeIOS: true,
+        });
+        
+        const recordingOptions = {
+          android: {
+            extension: '.wav',
+            outputFormat: Audio.AndroidOutputFormat.DEFAULT,
+            audioEncoder: Audio.AndroidAudioEncoder.DEFAULT,
+            sampleRate: streamingConfig.RATE,
+            numberOfChannels: streamingConfig.CHANNELS,
+            bitRate: 128000,
+          },
+          ios: {
+            extension: '.wav',
+            outputFormat: Audio.IOSOutputFormat.LINEARPCM,
+            audioQuality: Audio.IOSAudioQuality.HIGH,
+            sampleRate: streamingConfig.RATE,
+            numberOfChannels: streamingConfig.CHANNELS,
+            bitDepth: 16,
+            linearPCMBitDepth: 16,
+            linearPCMIsBigEndian: false,
+            linearPCMIsFloat: false,
+            bitRate: 128000, // Added bitRate field
+          },
+          web: {
+            mimeType: 'audio/wav',
+            bitsPerSecond: 128000,
+          },
+        };
+        
+        const { recording } = await Audio.Recording.createAsync(
+          recordingOptions,
+          (status) => {
+            if (status.isRecording && status.metering !== undefined) {
+              // In real streaming, we'd capture audio samples here
+            }
+          },
+          100
+        );
+        
+        recordingRef.current = recording;
+        
+        Alert.alert(
+          'Streaming Mode Active',
+          'Recording and analyzing in real-time. Play audio from speakers to test.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        const result = await ScreenRecorder.startRecording({ mic: false });
+        
+        if (result) {
+          Alert.alert(
+            'Streaming Recording Started',
+            'Switch to TikTok/Instagram. Audio will be analyzed in real-time.',
+            [{ text: 'Got it!' }]
+          );
+        }
+      }
+      
+      setIsRecording(true);
+      setStreamingStatus('Streaming active - waiting for audio...');
+      
+      streamingIntervalRef.current = setInterval(() => {
+        processStreamingChunk();
+      }, streamingConfig.STREAM_INTERVAL);
+      
+    } catch (error) {
+      console.error('Failed to start recording:', error);
+      Alert.alert('Error', 'Failed to start recording');
+      setIsRecording(false);
+      isStreamingRef.current = false;
+    }
+  }
+
+  async function stopRecording() {
+    if (!isRecording) return;
+    
+    try {
+      animateButtonPress();
+      console.log('Stopping streaming recording...');
+      isStreamingRef.current = false;
+      setIsRecording(false);
+      
+      if (streamingIntervalRef.current) {
+        clearInterval(streamingIntervalRef.current);
+        streamingIntervalRef.current = null;
+      }
+      
+      if (isDevelopment) {
+        if (recordingRef.current) {
+          await recordingRef.current.stopAndUnloadAsync();
+          await Audio.setAudioModeAsync({
+            allowsRecordingIOS: false,
+          });
+          
+          const uri = recordingRef.current.getURI();
+          if (uri) {
+            console.log('Final recording URI:', uri);
+            await FileSystem.deleteAsync(uri, { idempotent: true });
+          }
+          
+          recordingRef.current = null;
+        }
+      } else {
+        await ScreenRecorder.stopRecording();
+      }
+      
+      setStreamingStatus('Streaming stopped');
+      
+      const totalChunks = chunkCount;
+      const aiChunks = history.filter(h => h.isAI).length;
+      console.log(`Session summary: ${totalChunks} chunks processed, ${aiChunks} AI detections`);
+      
+    } catch (error) {
+      console.error('Failed to stop recording:', error);
+    }
+  }
+
+  if (isLoading) {
+    return <LoadingScreen onLoadComplete={() => setIsLoading(false)} />;
+  }
+
+  const titleRotate = titleRotateAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       {isDevelopment && (
         <View style={styles.devBanner}>
-          <Text style={styles.devText}>🔧 Development Mode</Text>
-          <Text style={styles.devSubtext}>Screen recording simulated with microphone</Text>
+          <Settings size={16} color="white" />
+          <Text style={styles.devText}>Development Mode</Text>
+          <Text style={styles.devSubtext}>Streaming audio from microphone</Text>
         </View>
       )}
       
-      <Text style={styles.title}>Lion Audio Detector</Text>
-      <Text style={styles.subtitle}>
-        {isDevelopment ? 'Microphone Mode' : 'Screen Recording Mode'}
-      </Text>
-      
-      <TouchableOpacity
+      <Animated.View
         style={[
-          styles.button,
-          isRecording && styles.recordingButton,
-          isProcessing && styles.processingButton,
+          styles.titleWrapper,
+          {
+            transform: [
+              { scale: titleScaleAnim },
+              { rotate: titleRotate },
+            ],
+          },
         ]}
-        onPress={isRecording ? stopRecording : startRecording}
-        disabled={isProcessing}
       >
-        {isProcessing ? (
-          <ActivityIndicator size="large" color="white" />
-        ) : (
-          <Text style={styles.buttonText}>
-            {isRecording ? 'Stop Recording' : 'Start Recording'}
-          </Text>
-        )}
-      </TouchableOpacity>
+        <Text style={styles.title}>LION</Text>
+      </Animated.View>
+      
+      <View style={styles.subtitleContainer}>
+        <Shield size={16} color="#999" />
+        <Text style={styles.subtitle}>Real-time AI Audio Detection</Text>
+      </View>
+      
+      <Animated.View
+        style={{
+          transform: [{ scale: pulseAnim }],
+        }}
+      >
+        <TouchableOpacity
+          style={[
+            styles.button,
+            isRecording && styles.recordingButton,
+            isProcessing && styles.processingButton,
+          ]}
+          onPress={isRecording ? stopRecording : startRecording}
+          disabled={isProcessing}
+          activeOpacity={0.8}
+        >
+          {isProcessing ? (
+            <ActivityIndicator size="large" color="white" />
+          ) : (
+            <View style={styles.buttonContent}>
+              {isRecording ? (
+                <>
+                  <MicOff size={24} color="white" strokeWidth={2} />
+                  <Text style={styles.buttonText}>Stop Streaming</Text>
+                </>
+              ) : (
+                <>
+                  <Mic size={24} color="white" strokeWidth={2} />
+                  <Text style={styles.buttonText}>Start Streaming</Text>
+                </>
+              )}
+            </View>
+          )}
+        </TouchableOpacity>
+      </Animated.View>
 
       {isRecording && (
         <>
-          <View style={styles.progressContainer}>
-            <View style={styles.progressBar}>
-              <View 
-                style={[
-                  styles.progressFill,
-                  { width: `${progress * 100}%` }
-                ]} 
-              />
-            </View>
-            <Text style={styles.progressText}>
-              {Math.round(progress * 30)}s / 30s
+          <View style={styles.streamingContainer}>
+            <Radio size={16} color="#FFD700" />
+            <Text style={styles.streamingStatus}>{streamingStatus}</Text>
+          </View>
+          
+          <View style={styles.chunkInfoContainer}>
+            <Zap size={14} color="#999" />
+            <Text style={styles.chunkInfo}>
+              Chunks processed: {chunkCount}
             </Text>
           </View>
-          <Text style={styles.recordingHint}>
-            {isDevelopment 
-              ? '🎤 Play audio from speakers'
-              : '📱 Switch to TikTok/Instagram now!'}
-          </Text>
+          
+          {detectionEvent && (
+            <Animated.View style={styles.alertBanner}>
+              <AlertTriangle size={20} color="white" strokeWidth={2} />
+              <Text style={styles.alertText}>
+                AI VOICE DETECTED - ACTIVE EVENT
+              </Text>
+            </Animated.View>
+          )}
         </>
       )}
 
-      {isProcessing && (
-        <Text style={styles.statusText}>Analyzing audio for AI content...</Text>
-      )}
-
-      {lastResult && !isRecording && !isProcessing && (
+      {lastResult && (
         <View style={[
           styles.resultContainer,
           lastResult.isAI ? styles.aiResult : styles.realResult
         ]}>
-          <Text style={styles.resultTitle}>
-            {lastResult.isAI ? '🚨 AI Generated' : '✅ Real Audio'}
-          </Text>
+          <View style={styles.resultHeader}>
+            {lastResult.isAI ? (
+              <AlertCircle size={20} color="#ff6b6b" strokeWidth={2} />
+            ) : (
+              <CheckCircle size={20} color="#51cf66" strokeWidth={2} />
+            )}
+            <Text style={styles.resultTitle}>
+              Chunk #{lastResult.chunkId}: {lastResult.isAI ? 'AI Detected' : 'Real Audio'}
+            </Text>
+          </View>
           <Text style={styles.resultPercent}>
             AI: {lastResult.aiPercent}% | Real: {lastResult.realPercent}%
           </Text>
@@ -377,14 +784,19 @@ export default function App() {
 
       {history.length > 0 && (
         <View style={styles.historyContainer}>
-          <Text style={styles.historyTitle}>Recent Detections</Text>
-          {history.map((item, index) => (
+          <View style={styles.historyHeader}>
+            <Activity size={18} color="#FFD700" />
+            <Text style={styles.historyTitle}>Streaming History</Text>
+          </View>
+          {history.slice(0, 10).map((item, index) => (
             <View key={index} style={styles.historyItem}>
-              <Text style={styles.historyIcon}>
-                {item.isAI ? '🚨' : '✅'}
-              </Text>
+              {item.isAI ? (
+                <AlertCircle size={16} color="#ff6b6b" strokeWidth={2} />
+              ) : (
+                <CheckCircle size={16} color="#51cf66" strokeWidth={2} />
+              )}
               <Text style={styles.historyText}>
-                {item.isAI ? 'AI' : 'Real'} ({item.aiPercent}%)
+                Chunk #{item.chunkId}: {item.isAI ? 'AI' : 'Real'} ({item.aiPercent}%)
               </Text>
               <Text style={styles.historyTime}>
                 {item.timestamp.toLocaleTimeString()}
@@ -398,6 +810,36 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
+  // Loading styles
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: '#1a1a1a',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingContent: {
+    alignItems: 'center',
+  },
+  titleContainer: {
+    flexDirection: 'row',
+    marginBottom: 20,
+  },
+  loadingLetter: {
+    fontSize: 48,
+    fontWeight: 'bold',
+    color: '#FFD700',
+    marginHorizontal: 5,
+  },
+  loadingSubtitle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  loadingSubtitleText: {
+    color: '#999',
+    fontSize: 16,
+  },
+
+  // Main app styles
   container: {
     flex: 1,
     backgroundColor: '#1a1a1a',
@@ -413,34 +855,44 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 20,
     width: '100%',
+    alignItems: 'center',
   },
   devText: {
     color: 'white',
     fontWeight: 'bold',
     textAlign: 'center',
+    marginTop: 5,
   },
   devSubtext: {
     color: 'white',
     fontSize: 12,
     textAlign: 'center',
   },
+  titleWrapper: {
+    marginBottom: 10,
+  },
   title: {
-    fontSize: 32,
+    fontSize: 48,
     fontWeight: 'bold',
     color: '#FFD700',
-    marginBottom: 10,
+    letterSpacing: 5,
+  },
+  subtitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 50,
+    gap: 8,
   },
   subtitle: {
     fontSize: 16,
     color: '#999',
-    marginBottom: 50,
   },
   button: {
     backgroundColor: '#FFD700',
     paddingHorizontal: 40,
     paddingVertical: 20,
     borderRadius: 30,
-    minWidth: 200,
+    minWidth: 220,
     alignItems: 'center',
     elevation: 5,
     shadowColor: '#000',
@@ -454,47 +906,58 @@ const styles = StyleSheet.create({
   processingButton: {
     backgroundColor: '#666',
   },
+  buttonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   buttonText: {
     color: 'white',
     fontSize: 18,
     fontWeight: 'bold',
   },
-  progressContainer: {
-    marginTop: 30,
+  streamingContainer: {
+    marginTop: 20,
     alignItems: 'center',
-    width: '100%',
+    flexDirection: 'row',
+    gap: 8,
   },
-  progressBar: {
-    width: '80%',
-    height: 10,
-    backgroundColor: '#333',
-    borderRadius: 5,
-    overflow: 'hidden',
+  streamingStatus: {
+    color: '#FFD700',
+    fontSize: 14,
   },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#FFD700',
+  chunkInfoContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
   },
-  progressText: {
+  chunkInfo: {
     color: '#999',
-    marginTop: 10,
+    fontSize: 12,
   },
-  recordingHint: {
-    color: '#FFD700',
+  alertBanner: {
+    backgroundColor: '#ff0000',
+    padding: 15,
+    borderRadius: 8,
     marginTop: 20,
+    width: '80%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  alertText: {
+    color: 'white',
+    fontWeight: 'bold',
+    textAlign: 'center',
     fontSize: 16,
-    fontWeight: '500',
-  },
-  statusText: {
-    color: '#FFD700',
-    marginTop: 20,
   },
   resultContainer: {
-    marginTop: 30,
-    padding: 20,
+    marginTop: 20,
+    padding: 15,
     borderRadius: 10,
     width: '80%',
-    alignItems: 'center',
   },
   aiResult: {
     backgroundColor: 'rgba(255, 107, 107, 0.2)',
@@ -506,44 +969,53 @@ const styles = StyleSheet.create({
     borderColor: '#51cf66',
     borderWidth: 2,
   },
+  resultHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
   resultTitle: {
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: 'bold',
     color: 'white',
-    marginBottom: 5,
   },
   resultPercent: {
-    fontSize: 16,
+    fontSize: 14,
     color: '#ccc',
+    marginLeft: 28,
   },
   historyContainer: {
     marginTop: 40,
     width: '100%',
   },
+  historyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 15,
+  },
   historyTitle: {
     fontSize: 18,
     color: '#FFD700',
-    marginBottom: 15,
     fontWeight: 'bold',
   },
   historyItem: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    padding: 15,
+    padding: 12,
     borderRadius: 8,
-    marginBottom: 10,
-  },
-  historyIcon: {
-    fontSize: 20,
-    marginRight: 10,
+    marginBottom: 8,
+    gap: 10,
   },
   historyText: {
     color: 'white',
     flex: 1,
+    fontSize: 12,
   },
   historyTime: {
     color: '#666',
-    fontSize: 12,
+    fontSize: 11,
   },
 });
