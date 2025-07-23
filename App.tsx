@@ -26,7 +26,6 @@ import {
   AlertTriangle,
   Radio,
   Settings,
-  ChevronRight
 } from 'lucide-react-native';
 
 // Add type declaration for global
@@ -34,7 +33,7 @@ declare global {
   var nativeModulesProxy: any;
 }
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
 // Check if we're in development mode without screen recorder
 const isDevelopment = __DEV__ && !global.nativeModulesProxy?.ScreenRecorder;
@@ -74,67 +73,154 @@ interface StreamingConfig {
   MIN_VOLUME_THRESHOLD: number;
 }
 
-// Loading Screen Component
+// Enhanced Loading Screen Component
 function LoadingScreen({ onLoadComplete }: { onLoadComplete: () => void }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(0.3)).current;
-  const rotateAnim = useRef(new Animated.Value(0)).current;
-  const letterAnims = useRef([
-    new Animated.Value(-50),
-    new Animated.Value(-50),
-    new Animated.Value(-50),
-    new Animated.Value(-50),
-  ]).current;
+  const shieldScale = useRef(new Animated.Value(0)).current;
+  const shieldRotate = useRef(new Animated.Value(0)).current;
+  const lineWidth = useRef(new Animated.Value(0)).current;
+  
+  // Individual letter animations with enhanced O animation
+  const letterAnims = useRef({
+    L: { translateY: new Animated.Value(30), opacity: new Animated.Value(0) },
+    I: { translateY: new Animated.Value(30), opacity: new Animated.Value(0) },
+    O: { 
+      translateY: new Animated.Value(30), 
+      opacity: new Animated.Value(0), 
+      rotate: new Animated.Value(0),
+      scale: new Animated.Value(0.5)
+    },
+    N: { translateY: new Animated.Value(30), opacity: new Animated.Value(0) },
+  }).current;
 
   useEffect(() => {
-    // Entrance animation sequence
-    Animated.parallel([
+    // Smooth entrance sequence
+    Animated.sequence([
+      // Fade in background
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 800,
+        duration: 300,
         useNativeDriver: true,
       }),
-      Animated.spring(scaleAnim, {
+      // Shield entrance with bounce
+      Animated.spring(shieldScale, {
         toValue: 1,
         tension: 20,
-        friction: 7,
+        friction: 5,
         useNativeDriver: true,
       }),
-    ]).start();
-
-    // Rotate the shield icon
-    Animated.loop(
-      Animated.timing(rotateAnim, {
+      // Animate letters with stagger
+      Animated.stagger(150, [
+        Animated.parallel([
+          Animated.spring(letterAnims.L.translateY, {
+            toValue: 0,
+            tension: 40,
+            friction: 6,
+            useNativeDriver: true,
+          }),
+          Animated.timing(letterAnims.L.opacity, {
+            toValue: 1,
+            duration: 400,
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.parallel([
+          Animated.spring(letterAnims.I.translateY, {
+            toValue: 0,
+            tension: 40,
+            friction: 6,
+            useNativeDriver: true,
+          }),
+          Animated.timing(letterAnims.I.opacity, {
+            toValue: 1,
+            duration: 400,
+            useNativeDriver: true,
+          }),
+        ]),
+        // Enhanced O animation
+        Animated.parallel([
+          Animated.spring(letterAnims.O.translateY, {
+            toValue: 0,
+            tension: 30,
+            friction: 5,
+            useNativeDriver: true,
+          }),
+          Animated.timing(letterAnims.O.opacity, {
+            toValue: 1,
+            duration: 600,
+            useNativeDriver: true,
+          }),
+          // Multiple rotations with scale
+          Animated.sequence([
+            Animated.parallel([
+              Animated.timing(letterAnims.O.rotate, {
+                toValue: 2, // 720 degrees
+                duration: 1200,
+                easing: Easing.out(Easing.back(1.5)),
+                useNativeDriver: true,
+              }),
+              Animated.sequence([
+                Animated.timing(letterAnims.O.scale, {
+                  toValue: 1.3,
+                  duration: 600,
+                  easing: Easing.out(Easing.quad),
+                  useNativeDriver: true,
+                }),
+                Animated.timing(letterAnims.O.scale, {
+                  toValue: 1,
+                  duration: 600,
+                  easing: Easing.in(Easing.quad),
+                  useNativeDriver: true,
+                }),
+              ]),
+            ]),
+          ]),
+        ]),
+        Animated.parallel([
+          Animated.spring(letterAnims.N.translateY, {
+            toValue: 0,
+            tension: 40,
+            friction: 6,
+            useNativeDriver: true,
+          }),
+          Animated.timing(letterAnims.N.opacity, {
+            toValue: 1,
+            duration: 400,
+            useNativeDriver: true,
+          }),
+        ]),
+      ]),
+      // Underline animation
+      Animated.timing(lineWidth, {
         toValue: 1,
-        duration: 4000,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      })
-    ).start();
-
-    // Animate letters dropping in
-    const letterAnimations = letterAnims.map((anim, index) =>
-      Animated.spring(anim, {
-        toValue: 0,
-        delay: index * 100,
-        tension: 50,
-        friction: 7,
-        useNativeDriver: true,
-      })
-    );
-
-    Animated.sequence([
-      Animated.delay(300),
-      Animated.parallel(letterAnimations),
+        duration: 600,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: false,
+      }),
     ]).start(() => {
-      // Complete loading after animations
-      setTimeout(onLoadComplete, 1000);
+      // Shield continuous rotation
+      Animated.loop(
+        Animated.timing(shieldRotate, {
+          toValue: 1,
+          duration: 8000,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+      ).start();
+      
+      // Complete after animation
+      setTimeout(onLoadComplete, 800);
     });
   }, []);
 
-  const spin = rotateAnim.interpolate({
+  const shieldSpin = shieldRotate.interpolate({
     inputRange: [0, 1],
     outputRange: ['0deg', '360deg'],
+  });
+
+  const oSpin = letterAnims.O.rotate.interpolate({
+    inputRange: [0, 1, 2],
+    outputRange: ['0deg', '360deg', '720deg'],
   });
 
   return (
@@ -142,57 +228,206 @@ function LoadingScreen({ onLoadComplete }: { onLoadComplete: () => void }) {
       <Animated.View
         style={[
           styles.loadingContent,
-          {
-            opacity: fadeAnim,
-            transform: [{ scale: scaleAnim }],
-          },
+          { opacity: fadeAnim }
         ]}
       >
         <Animated.View
-          style={{
-            transform: [{ rotate: spin }],
-            marginBottom: 40,
-          }}
+          style={[
+            styles.shieldContainer,
+            {
+              transform: [
+                { scale: shieldScale },
+                { rotate: shieldSpin }
+              ],
+            },
+          ]}
         >
-          <Shield size={80} color="#FFD700" strokeWidth={1.5} />
+          <Shield size={60} color="#FFD700" strokeWidth={1} />
         </Animated.View>
 
-        <View style={styles.titleContainer}>
-          {['L', 'I', 'O', 'N'].map((letter, index) => (
-            <Animated.Text
-              key={index}
-              style={[
-                styles.loadingLetter,
-                {
-                  transform: [
-                    { translateY: letterAnims[index] },
-                    {
-                      rotate: index === 2 ? '360deg' : '0deg', // Spin the 'O'
-                    },
-                  ],
-                },
-              ]}
-            >
-              {letter}
-            </Animated.Text>
-          ))}
+        <View style={styles.letterContainer}>
+          <Animated.Text
+            style={[
+              styles.loadingLetter,
+              {
+                opacity: letterAnims.L.opacity,
+                transform: [{ translateY: letterAnims.L.translateY }],
+              },
+            ]}
+          >
+            L
+          </Animated.Text>
+          <Animated.Text
+            style={[
+              styles.loadingLetter,
+              {
+                opacity: letterAnims.I.opacity,
+                transform: [{ translateY: letterAnims.I.translateY }],
+              },
+            ]}
+          >
+            I
+          </Animated.Text>
+          <Animated.Text
+            style={[
+              styles.loadingLetter,
+              styles.loadingLetter,
+              {
+                opacity: letterAnims.O.opacity,
+                transform: [
+                  { translateY: letterAnims.O.translateY },
+                  { rotate: oSpin },
+                  { scale: letterAnims.O.scale }
+                ],
+              },
+            ]}
+          >
+            O
+          </Animated.Text>
+          <Animated.Text
+            style={[
+              styles.loadingLetter,
+              {
+                opacity: letterAnims.N.opacity,
+                transform: [{ translateY: letterAnims.N.translateY }],
+              },
+            ]}
+          >
+            N
+          </Animated.Text>
         </View>
 
         <Animated.View
           style={[
-            styles.loadingSubtitle,
+            styles.underline,
             {
-              opacity: fadeAnim,
+              width: lineWidth.interpolate({
+                inputRange: [0, 1],
+                outputRange: ['0%', '80%'],
+              }),
             },
           ]}
+        />
+
+        <Animated.Text
+          style={[
+            styles.tagline,
+            { opacity: lineWidth }
+          ]}
         >
-          <Text style={styles.loadingSubtitleText}>AI Audio Detection</Text>
-          <Activity
-            size={16}
-            color="#999"
-            style={{ marginLeft: 8 }}
-          />
-        </Animated.View>
+          AI Audio Detection
+        </Animated.Text>
+      </Animated.View>
+    </View>
+  );
+}
+
+// Minimal Button Component
+function MinimalButton({ onPress, isRecording, isProcessing }: any) {
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const borderWidth = useRef(new Animated.Value(1)).current;
+  const glowOpacity = useRef(new Animated.Value(0)).current;
+
+  const handlePress = () => {
+    // Button animation sequence
+    Animated.sequence([
+      // Scale down slightly
+      Animated.timing(scaleAnim, {
+        toValue: 0.95,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+      // Spring back with border pulse
+      Animated.parallel([
+        Animated.spring(scaleAnim, {
+          toValue: 1,
+          friction: 3,
+          tension: 40,
+          useNativeDriver: true,
+        }),
+        // Border pulse effect
+        Animated.sequence([
+          Animated.timing(borderWidth, {
+            toValue: 3,
+            duration: 200,
+            useNativeDriver: false,
+          }),
+          Animated.timing(borderWidth, {
+            toValue: 1,
+            duration: 300,
+            useNativeDriver: false,
+          }),
+        ]),
+        // Glow effect
+        Animated.sequence([
+          Animated.timing(glowOpacity, {
+            toValue: 1,
+            duration: 500,
+            useNativeDriver: true,
+          }),
+          Animated.timing(glowOpacity, {
+            toValue: 0,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+        ]),
+      ]),
+    ]).start();
+
+    onPress();
+  };
+
+  return (
+    <View style={styles.buttonWrapper}>
+      {/* Glow effect */}
+      <Animated.View
+        style={[
+          styles.buttonGlow,
+          {
+            opacity: glowOpacity,
+          },
+        ]}
+      />
+      
+      <Animated.View
+        style={{
+          transform: [{ scale: scaleAnim }],
+        }}
+      >
+        <TouchableOpacity
+          onPress={handlePress}
+          disabled={isProcessing}
+          activeOpacity={0.9}
+        >
+          <Animated.View
+            style={[
+              styles.button,
+              isRecording && styles.minimalButtonRecording,
+              isProcessing && styles.minimalButtonProcessing,
+              {
+                borderWidth: borderWidth,
+              },
+            ]}
+          >
+            {isProcessing ? (
+              <ActivityIndicator size="small" color="#FFD700" />
+            ) : (
+              <View style={styles.buttonContent}>
+                {isRecording ? (
+                  <>
+                    <MicOff size={20} color="#FFD700" strokeWidth={1} />
+                    <Text style={styles.minimalButtonText}>STOP</Text>
+                  </>
+                ) : (
+                  <>
+                    <Mic size={20} color="#FFD700" strokeWidth={1} />
+                    <Text style={styles.minimalButtonText}>START</Text>
+                  </>
+                )}
+              </View>
+            )}
+          </Animated.View>
+        </TouchableOpacity>
       </Animated.View>
     </View>
   );
@@ -201,11 +436,6 @@ function LoadingScreen({ onLoadComplete }: { onLoadComplete: () => void }) {
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   
-  // Title animation refs
-  const titleScaleAnim = useRef(new Animated.Value(1)).current;
-  const titleRotateAnim = useRef(new Animated.Value(0)).current;
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-
   // Streaming configuration
   const streamingConfig: StreamingConfig = {
     RATE: 22050,
@@ -232,25 +462,17 @@ export default function App() {
   const lastProcessTimeRef = useRef(0);
   const consecutiveDetectionsRef = useRef(0);
 
+  // Animation refs
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
   useEffect(() => {
     if (!isLoading) {
-      // Start pulse animation when app loads
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, {
-            toValue: 1.1,
-            duration: 1000,
-            easing: Easing.inOut(Easing.ease),
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulseAnim, {
-            toValue: 1,
-            duration: 1000,
-            easing: Easing.inOut(Easing.ease),
-            useNativeDriver: true,
-          }),
-        ])
-      ).start();
+      // Fade in main content
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 600,
+        useNativeDriver: true,
+      }).start();
     }
 
     // Request permissions
@@ -274,34 +496,6 @@ export default function App() {
       }
     };
   }, [isLoading]);
-
-  // Button press animation
-  const animateButtonPress = () => {
-    // Animate title
-    Animated.parallel([
-      Animated.sequence([
-        Animated.timing(titleScaleAnim, {
-          toValue: 0.9,
-          duration: 100,
-          useNativeDriver: true,
-        }),
-        Animated.spring(titleScaleAnim, {
-          toValue: 1,
-          friction: 3,
-          tension: 40,
-          useNativeDriver: true,
-        }),
-      ]),
-      Animated.timing(titleRotateAnim, {
-        toValue: 1,
-        duration: 500,
-        easing: Easing.elastic(1),
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      titleRotateAnim.setValue(0);
-    });
-  };
 
   // Calculate RMS volume
   function calculateRMS(audioData: number[]): number {
@@ -327,13 +521,13 @@ export default function App() {
     const bufferDuration = bufferCopy.length / streamingConfig.RATE;
 
     if (bufferDuration < streamingConfig.CHUNK_DURATION) {
-      setStreamingStatus(`Buffering... (${bufferDuration.toFixed(1)}s / ${streamingConfig.CHUNK_DURATION}s needed)`);
+      setStreamingStatus(`Buffering... (${bufferDuration.toFixed(1)}s / ${streamingConfig.CHUNK_DURATION}s)`);
       return;
     }
 
     const volume = calculateRMS(bufferCopy);
     if (volume < streamingConfig.MIN_VOLUME_THRESHOLD) {
-      setStreamingStatus(`Audio too quiet (${volume.toFixed(6)})`);
+      setStreamingStatus(`Audio too quiet`);
       return;
     }
 
@@ -342,7 +536,7 @@ export default function App() {
 
     const currentChunkId = chunkCount + 1;
     setChunkCount(currentChunkId);
-    setStreamingStatus(`Processing chunk #${currentChunkId} (${streamingConfig.CHUNK_DURATION}s, vol: ${volume.toFixed(4)})`);
+    setStreamingStatus(`Processing chunk #${currentChunkId}`);
 
     try {
       const wavBlob = await createWavBlob(chunkData, streamingConfig.RATE);
@@ -511,7 +705,7 @@ export default function App() {
         Notifications.scheduleNotificationAsync({
           content: {
             title: 'AI Audio Detection Event',
-            body: `AI voice detected: ${aiPercent}% confidence (streaming)`,
+            body: `AI voice detected: ${aiPercent}% confidence`,
           },
           trigger: null,
         });
@@ -526,12 +720,11 @@ export default function App() {
       }
     }
     
-    setStreamingStatus(`Chunk #${chunkId}: ${isAI ? 'AI' : 'Real'} (${aiPercent}% AI)`);
+    setStreamingStatus(`Chunk #${chunkId}: ${isAI ? 'AI Detected' : 'Real Audio'}`);
   }
 
   async function startRecording() {
     try {
-      animateButtonPress();
       console.log('Starting streaming recording...');
       
       audioBufferRef.current = [];
@@ -563,11 +756,11 @@ export default function App() {
             audioQuality: Audio.IOSAudioQuality.HIGH,
             sampleRate: streamingConfig.RATE,
             numberOfChannels: streamingConfig.CHANNELS,
+            bitRate: 128000,
             bitDepth: 16,
             linearPCMBitDepth: 16,
             linearPCMIsBigEndian: false,
             linearPCMIsFloat: false,
-            bitRate: 128000, // Added bitRate field
           },
           web: {
             mimeType: 'audio/wav',
@@ -588,8 +781,8 @@ export default function App() {
         recordingRef.current = recording;
         
         Alert.alert(
-          'Streaming Mode Active',
-          'Recording and analyzing in real-time. Play audio from speakers to test.',
+          'Streaming Active',
+          'Real-time analysis enabled. Play audio to test.',
           [{ text: 'OK' }]
         );
       } else {
@@ -597,15 +790,15 @@ export default function App() {
         
         if (result) {
           Alert.alert(
-            'Streaming Recording Started',
-            'Switch to TikTok/Instagram. Audio will be analyzed in real-time.',
-            [{ text: 'Got it!' }]
+            'Streaming Started',
+            'Switch to your target app. Audio will be analyzed in real-time.',
+            [{ text: 'OK' }]
           );
         }
       }
       
       setIsRecording(true);
-      setStreamingStatus('Streaming active - waiting for audio...');
+      setStreamingStatus('Waiting for audio...');
       
       streamingIntervalRef.current = setInterval(() => {
         processStreamingChunk();
@@ -623,7 +816,6 @@ export default function App() {
     if (!isRecording) return;
     
     try {
-      animateButtonPress();
       console.log('Stopping streaming recording...');
       isStreamingRef.current = false;
       setIsRecording(false);
@@ -652,11 +844,11 @@ export default function App() {
         await ScreenRecorder.stopRecording();
       }
       
-      setStreamingStatus('Streaming stopped');
+      setStreamingStatus('Stopped');
       
       const totalChunks = chunkCount;
       const aiChunks = history.filter(h => h.isAI).length;
-      console.log(`Session summary: ${totalChunks} chunks processed, ${aiChunks} AI detections`);
+      console.log(`Session: ${totalChunks} chunks, ${aiChunks} AI detections`);
       
     } catch (error) {
       console.error('Failed to stop recording:', error);
@@ -667,145 +859,102 @@ export default function App() {
     return <LoadingScreen onLoadComplete={() => setIsLoading(false)} />;
   }
 
-  const titleRotate = titleRotateAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
-  });
-
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
+    <Animated.ScrollView 
+      style={[styles.container, { opacity: fadeAnim }]} 
+      contentContainerStyle={styles.contentContainer}
+    >
       {isDevelopment && (
         <View style={styles.devBanner}>
-          <Settings size={16} color="white" />
+          <Settings size={14} color="white" strokeWidth={1.5} />
           <Text style={styles.devText}>Development Mode</Text>
-          <Text style={styles.devSubtext}>Streaming audio from microphone</Text>
         </View>
       )}
       
-      <Animated.View
-        style={[
-          styles.titleWrapper,
-          {
-            transform: [
-              { scale: titleScaleAnim },
-              { rotate: titleRotate },
-            ],
-          },
-        ]}
-      >
+      <View style={styles.header}>
         <Text style={styles.title}>LION</Text>
-      </Animated.View>
-      
-      <View style={styles.subtitleContainer}>
-        <Shield size={16} color="#999" />
-        <Text style={styles.subtitle}>Real-time AI Audio Detection</Text>
+        <View style={styles.subtitleRow}>
+          <Shield size={14} color="#666" strokeWidth={1.5} />
+          <Text style={styles.subtitle}>AI AUDIO DETECTION</Text>
+        </View>
       </View>
       
-      <Animated.View
-        style={{
-          transform: [{ scale: pulseAnim }],
-        }}
-      >
-        <TouchableOpacity
-          style={[
-            styles.button,
-            isRecording && styles.recordingButton,
-            isProcessing && styles.processingButton,
-          ]}
-          onPress={isRecording ? stopRecording : startRecording}
-          disabled={isProcessing}
-          activeOpacity={0.8}
-        >
-          {isProcessing ? (
-            <ActivityIndicator size="large" color="white" />
-          ) : (
-            <View style={styles.buttonContent}>
-              {isRecording ? (
-                <>
-                  <MicOff size={24} color="white" strokeWidth={2} />
-                  <Text style={styles.buttonText}>Stop Streaming</Text>
-                </>
-              ) : (
-                <>
-                  <Mic size={24} color="white" strokeWidth={2} />
-                  <Text style={styles.buttonText}>Start Streaming</Text>
-                </>
-              )}
-            </View>
-          )}
-        </TouchableOpacity>
-      </Animated.View>
+      <MinimalButton
+        onPress={isRecording ? stopRecording : startRecording}
+        isRecording={isRecording}
+        isProcessing={isProcessing}
+      />
 
       {isRecording && (
-        <>
-          <View style={styles.streamingContainer}>
-            <Radio size={16} color="#FFD700" />
-            <Text style={styles.streamingStatus}>{streamingStatus}</Text>
+        <View style={styles.statusContainer}>
+          <View style={styles.statusRow}>
+            <Radio size={14} color="#FFD700" strokeWidth={1.5} />
+            <Text style={styles.statusText}>{streamingStatus}</Text>
           </View>
           
-          <View style={styles.chunkInfoContainer}>
-            <Zap size={14} color="#999" />
-            <Text style={styles.chunkInfo}>
-              Chunks processed: {chunkCount}
-            </Text>
+          <View style={styles.chunkRow}>
+            <Zap size={12} color="#666" strokeWidth={1.5} />
+            <Text style={styles.chunkText}>Chunks: {chunkCount}</Text>
           </View>
           
           {detectionEvent && (
-            <Animated.View style={styles.alertBanner}>
-              <AlertTriangle size={20} color="white" strokeWidth={2} />
-              <Text style={styles.alertText}>
-                AI VOICE DETECTED - ACTIVE EVENT
-              </Text>
-            </Animated.View>
+            <View style={styles.alertBanner}>
+              <AlertTriangle size={18} color="white" strokeWidth={1.5} />
+              <Text style={styles.alertText}>AI VOICE DETECTED</Text>
+            </View>
           )}
-        </>
+        </View>
       )}
 
       {lastResult && (
         <View style={[
-          styles.resultContainer,
-          lastResult.isAI ? styles.aiResult : styles.realResult
+          styles.resultCard,
+          lastResult.isAI ? styles.aiCard : styles.realCard
         ]}>
           <View style={styles.resultHeader}>
             {lastResult.isAI ? (
-              <AlertCircle size={20} color="#ff6b6b" strokeWidth={2} />
+              <AlertCircle size={18} color="#ff0000" strokeWidth={1.5} />
             ) : (
-              <CheckCircle size={20} color="#51cf66" strokeWidth={2} />
+              <CheckCircle size={18} color="#00ff00" strokeWidth={1.5} />
             )}
             <Text style={styles.resultTitle}>
-              Chunk #{lastResult.chunkId}: {lastResult.isAI ? 'AI Detected' : 'Real Audio'}
+              {lastResult.isAI ? 'AI DETECTED' : 'REAL AUDIO'}
             </Text>
           </View>
-          <Text style={styles.resultPercent}>
-            AI: {lastResult.aiPercent}% | Real: {lastResult.realPercent}%
+          <Text style={styles.resultStats}>
+            AI: {lastResult.aiPercent}% • REAL: {lastResult.realPercent}%
           </Text>
         </View>
       )}
 
       {history.length > 0 && (
-        <View style={styles.historyContainer}>
+        <View style={styles.historySection}>
           <View style={styles.historyHeader}>
-            <Activity size={18} color="#FFD700" />
-            <Text style={styles.historyTitle}>Streaming History</Text>
+            <Activity size={16} color="#FFD700" strokeWidth={1.5} />
+            <Text style={styles.historyTitle}>RECENT ACTIVITY</Text>
           </View>
-          {history.slice(0, 10).map((item, index) => (
-            <View key={index} style={styles.historyItem}>
-              {item.isAI ? (
-                <AlertCircle size={16} color="#ff6b6b" strokeWidth={2} />
-              ) : (
-                <CheckCircle size={16} color="#51cf66" strokeWidth={2} />
-              )}
-              <Text style={styles.historyText}>
-                Chunk #{item.chunkId}: {item.isAI ? 'AI' : 'Real'} ({item.aiPercent}%)
-              </Text>
-              <Text style={styles.historyTime}>
-                {item.timestamp.toLocaleTimeString()}
-              </Text>
-            </View>
-          ))}
+          <View style={styles.historyList}>
+            {history.slice(0, 5).map((item, index) => (
+              <View key={index} style={styles.historyItem}>
+                <View style={styles.historyIcon}>
+                  {item.isAI ? (
+                    <AlertCircle size={14} color="#ff0000" strokeWidth={1.5} />
+                  ) : (
+                    <CheckCircle size={14} color="#00ff00" strokeWidth={1.5} />
+                  )}
+                </View>
+                <Text style={styles.historyText}>
+                  #{item.chunkId} • {item.aiPercent}% AI
+                </Text>
+                <Text style={styles.historyTime}>
+                  {item.timestamp.toLocaleTimeString()}
+                </Text>
+              </View>
+            ))}
+          </View>
         </View>
       )}
-    </ScrollView>
+    </Animated.ScrollView>
   );
 }
 
@@ -813,98 +962,130 @@ const styles = StyleSheet.create({
   // Loading styles
   loadingContainer: {
     flex: 1,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#0a0a0a',
     alignItems: 'center',
     justifyContent: 'center',
   },
   loadingContent: {
     alignItems: 'center',
   },
-  titleContainer: {
+  shieldContainer: {
+    marginBottom: 40,
+  },
+  minimalButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '300',
+    letterSpacing: 3,
+  },
+  buttonGlow: {
+    position: 'absolute',
+    width: 140,
+    height: 75,
+    borderRadius: 45,
+    backgroundColor: 'rgba(255, 215, 0, 0.5)',
+  },
+  minimalButtonRecording: {
+    backgroundColor: '#ff0000',
+  },
+  minimalButtonProcessing: {
+    backgroundColor: '#333',
+    opacity: 0.6,
+  },
+  letterContainer: {
     flexDirection: 'row',
     marginBottom: 20,
   },
   loadingLetter: {
-    fontSize: 48,
-    fontWeight: 'bold',
+    fontSize: 56,
+    fontWeight: '300',
     color: '#FFD700',
-    marginHorizontal: 5,
+    marginHorizontal: 8,
+    letterSpacing: 2,
+    fontStyle: 'italic',
   },
-  loadingSubtitle: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  underline: {
+    height: 2,
+    backgroundColor: '#FFD700',
+    marginBottom: 30,
   },
-  loadingSubtitleText: {
-    color: '#999',
-    fontSize: 16,
+  tagline: {
+    color: '#666',
+    fontSize: 14,
+    letterSpacing: 3,
+    textTransform: 'uppercase',
   },
 
   // Main app styles
   container: {
     flex: 1,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#0a0a0a',
   },
   contentContainer: {
     alignItems: 'center',
-    paddingVertical: 50,
+    paddingVertical: 60,
     paddingHorizontal: 20,
   },
   devBanner: {
-    backgroundColor: '#FF6B6B',
-    padding: 10,
-    borderRadius: 8,
-    marginBottom: 20,
-    width: '100%',
-    alignItems: 'center',
-  },
-  devText: {
-    color: 'white',
-    fontWeight: 'bold',
-    textAlign: 'center',
-    marginTop: 5,
-  },
-  devSubtext: {
-    color: 'white',
-    fontSize: 12,
-    textAlign: 'center',
-  },
-  titleWrapper: {
-    marginBottom: 10,
-  },
-  title: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#FFD700',
-    letterSpacing: 5,
-  },
-  subtitleContainer: {
+    backgroundColor: 'rgba(255, 0, 0, 0.1)',
+    borderWidth: 1,
+    borderColor: '#ff0000',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 4,
+    marginBottom: 30,
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 50,
+    gap: 8,
+  },
+  devText: {
+    color: '#ff0000',
+    fontSize: 12,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  header: {
+    alignItems: 'center',
+    marginBottom: 60,
+  },
+  title: {
+    fontSize: 64,
+    fontWeight: '200',
+    color: '#FFD700',
+    letterSpacing: 12,
+    marginBottom: 12,
+  },
+  subtitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
   },
   subtitle: {
-    fontSize: 16,
-    color: '#999',
+    fontSize: 12,
+    color: '#666',
+    letterSpacing: 4,
+  },
+
+  // Button styles
+  buttonWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 50,
   },
   button: {
-    backgroundColor: '#FFD700',
-    paddingHorizontal: 40,
-    paddingVertical: 20,
-    borderRadius: 30,
-    minWidth: 220,
+    backgroundColor: 'black',
+    paddingHorizontal: 15,
+    paddingVertical: 18,
+    borderRadius: 50,
+    minWidth: 100,
     alignItems: 'center',
-    elevation: 5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
+    borderColor: '#FFD700',
   },
   recordingButton: {
-    backgroundColor: '#ff6b6b',
+    backgroundColor: '#ff0000',
   },
   processingButton: {
-    backgroundColor: '#666',
+    backgroundColor: '#333',
   },
   buttonContent: {
     flexDirection: 'row',
@@ -913,109 +1094,146 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: 'white',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  streamingContainer: {
-    marginTop: 20,
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 8,
-  },
-  streamingStatus: {
-    color: '#FFD700',
-    fontSize: 14,
-  },
-  chunkInfoContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 8,
-  },
-  chunkInfo: {
-    color: '#999',
-    fontSize: 12,
-  },
-  alertBanner: {
-    backgroundColor: '#ff0000',
-    padding: 15,
-    borderRadius: 8,
-    marginTop: 20,
-    width: '80%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  alertText: {
-    color: 'white',
-    fontWeight: 'bold',
-    textAlign: 'center',
     fontSize: 16,
+    fontWeight: '300',
+    letterSpacing: 3,
   },
-  resultContainer: {
-    marginTop: 20,
-    padding: 15,
-    borderRadius: 10,
-    width: '80%',
-  },
-  aiResult: {
-    backgroundColor: 'rgba(255, 107, 107, 0.2)',
-    borderColor: '#ff6b6b',
+
+  // Ripple styles
+  ripple: {
+    position: 'absolute',
+    width: 220,
+    height: 220,
+    borderRadius: 110,
     borderWidth: 2,
   },
-  realResult: {
-    backgroundColor: 'rgba(81, 207, 102, 0.2)',
-    borderColor: '#51cf66',
-    borderWidth: 2,
+  rippleRed: {
+    borderColor: '#ff0000',
   },
-  resultHeader: {
+  rippleBlack: {
+    borderColor: '#000000',
+  },
+
+  // Status styles
+  statusContainer: {
+    alignItems: 'center',
+    marginBottom: 30,
+  },
+  statusRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     marginBottom: 8,
   },
-  resultTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: 'white',
-  },
-  resultPercent: {
+  statusText: {
+    color: '#FFD700',
     fontSize: 14,
-    color: '#ccc',
+    letterSpacing: 1,
+  },
+  chunkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  chunkText: {
+    color: '#666',
+    fontSize: 12,
+    letterSpacing: 1,
+  },
+
+  // Alert banner
+  alertBanner: {
+    backgroundColor: '#ff0000',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 4,
+    marginTop: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  alertText: {
+    color: 'white',
+    fontSize: 14,
+    letterSpacing: 2,
+    fontWeight: '300',
+  },
+
+  // Result card
+  resultCard: {
+    width: '100%',
+    padding: 20,
+    borderRadius: 4,
+    marginBottom: 30,
+    borderWidth: 1,
+  },
+  aiCard: {
+    backgroundColor: 'rgba(255, 0, 0, 0.05)',
+    borderColor: '#ff0000',
+  },
+  realCard: {
+    backgroundColor: 'rgba(0, 255, 0, 0.05)',
+    borderColor: '#00ff00',
+  },
+  resultHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 8,
+  },
+  resultTitle: {
+    color: 'white',
+    fontSize: 16,
+    letterSpacing: 2,
+    fontWeight: '300',
+  },
+  resultStats: {
+    color: '#666',
+    fontSize: 12,
+    letterSpacing: 1,
     marginLeft: 28,
   },
-  historyContainer: {
-    marginTop: 40,
+
+  // History section
+  historySection: {
     width: '100%',
+    marginTop: 20,
   },
   historyHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 15,
+    marginBottom: 20,
   },
   historyTitle: {
-    fontSize: 18,
     color: '#FFD700',
-    fontWeight: 'bold',
+    fontSize: 14,
+    letterSpacing: 3,
+    fontWeight: '300',
+  },
+  historyList: {
+    gap: 8,
   },
   historyItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    backgroundColor: 'rgba(255, 255, 255, 0.02)',
     padding: 12,
-    borderRadius: 8,
-    marginBottom: 8,
-    gap: 10,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  historyIcon: {
+    marginRight: 12,
   },
   historyText: {
-    color: 'white',
-    flex: 1,
+    color: '#999',
     fontSize: 12,
+    flex: 1,
+    letterSpacing: 1,
   },
   historyTime: {
-    color: '#666',
+    color: '#444',
     fontSize: 11,
   },
 });
