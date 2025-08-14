@@ -15,14 +15,14 @@
     "expo-background-fetch": "~13.1.6",
     "expo-dev-client": "~5.2.4",
     "expo-file-system": "~18.1.11",
-    "expo-notifications": "~0.31.4",
+    "expo-notifications": "^0.31.4",
     "expo-screen-capture": "~7.1.5",
     "expo-status-bar": "~2.2.3",
     "expo-task-manager": "~13.1.6",
     "lucide-react-native": "^0.525.0",
     "react": "19.0.0",
     "react-native": "0.79.5",
-    "react-native-screen-recorder": "^1.0.6",
+    "react-native-record-screen": "^0.6.2",
     "react-native-view-shot": "4.0.3"
   },
   "devDependencies": {
